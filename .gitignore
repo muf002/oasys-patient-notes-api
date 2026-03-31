@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+wheels/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+uv.lock
+
+# Environment variables — never commit secrets
+.env
+
+# Mypy
+.mypy_cache/
+
+# Ruff
+.ruff_cache/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
