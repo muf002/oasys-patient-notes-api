@@ -17,7 +17,7 @@ venv/
 env/
 
 # uv
-uv.lock
+# Note: uv.lock is intentionally committed — required for reproducible installs and `uv sync --frozen`
 
 # Environment variables — never commit secrets
 .env
@@ -36,6 +36,7 @@ htmlcov/
 # IDEs
 .vscode/
 .idea/
+.claude/
 *.swp
 *.swo
 
@@ -44,3 +45,6 @@ htmlcov/
 
 # Logs
 *.log
+
+# Generated token files (written by startup script, contain secrets)
+data/tokens.json

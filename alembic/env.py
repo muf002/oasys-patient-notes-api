@@ -12,12 +12,12 @@ config = context.config
 
 # Set up Python logging from alembic.ini
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # Metadata for autogenerate support — import all models here so they register
 # against Base.metadata before autogenerate inspects it.
-# Models will be imported here as they are added:
-# from app.models import provider, patient, note  # noqa: F401
+import app.models  # noqa: E402, F401, I001 — must come after Base is defined; registers models against Base.metadata
+
 target_metadata = Base.metadata
 
 

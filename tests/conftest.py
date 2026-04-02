@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 from collections.abc import AsyncGenerator, Generator
 
 import pytest
@@ -8,7 +9,9 @@ from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
 from app.core.database import Base, get_async_session
+from app.core.dependencies import get_current_provider
 from app.main import create_app
+from app.models.provider import Provider
 
 # ---------------------------------------------------------------------------
 # Session-scoped: spin up a real PostgreSQL 16 container once per test session
@@ -66,6 +69,86 @@ async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:  # type: 
     async with session_factory() as session, session.begin():
         yield session
         await session.rollback()
+
+
+# ---------------------------------------------------------------------------
+# Provider fixtures — create real Provider rows, no JWT involved
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def provider_a(db_session: AsyncSession) -> Provider:
+    provider = Provider(
+        id=uuid.uuid4(),
+        name="Dr. Alice",
+        email=f"alice-{uuid.uuid4()}@test.com",
+    )
+    db_session.add(provider)
+    await db_session.flush()
+    await db_session.refresh(provider)
+    return provider
+
+
+@pytest.fixture
+async def provider_b(db_session: AsyncSession) -> Provider:
+    provider = Provider(
+        id=uuid.uuid4(),
+        name="Dr. Bob",
+        email=f"bob-{uuid.uuid4()}@test.com",
+    )
+    db_session.add(provider)
+    await db_session.flush()
+    await db_session.refresh(provider)
+    return provider
+
+
+# ---------------------------------------------------------------------------
+# Auth clients — bypass JWT entirely; inject Provider directly via DI override
+# ---------------------------------------------------------------------------
+
+
+def _make_auth_client(
+    db_session: AsyncSession, provider: Provider
+) -> AsyncGenerator[AsyncClient, None]:
+    async def _gen() -> AsyncGenerator[AsyncClient, None]:
+        app = create_app()
+
+        async def _override_db() -> AsyncGenerator[AsyncSession, None]:
+            yield db_session
+
+        app.dependency_overrides[get_async_session] = _override_db
+        app.dependency_overrides[get_current_provider] = lambda: provider
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            yield client
+
+        app.dependency_overrides.clear()
+
+    return _gen()
+
+
+@pytest.fixture
+async def auth_client_a(
+    db_session: AsyncSession, provider_a: Provider
+) -> AsyncGenerator[AsyncClient, None]:
+    async for client in _make_auth_client(db_session, provider_a):
+        yield client
+
+
+@pytest.fixture
+async def auth_client_b(
+    db_session: AsyncSession, provider_b: Provider
+) -> AsyncGenerator[AsyncClient, None]:
+    async for client in _make_auth_client(db_session, provider_b):
+        yield client
+
+
+# ---------------------------------------------------------------------------
+# Generic unauthenticated client (for health check, provider creation tests)
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture

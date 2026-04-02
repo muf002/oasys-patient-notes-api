@@ -12,6 +12,8 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.14.0",
     "python-multipart>=0.0.20",
+    "PyJWT>=2.9.0",
+    "email-validator>=2.2.0",
 ]
 
 [dependency-groups]
