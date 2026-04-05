@@ -25,12 +25,18 @@ class GroqWhisperTranscriber:
 
 class StubTranscriber:
     """Deterministic stub — production fallback when GROQ_API_KEY is absent
-    and used directly in integration tests to avoid real API calls."""
+    and used directly in integration tests to avoid real API calls.
+    Pass raises= to simulate failure in unit tests."""
 
     def __init__(
-        self, transcript: str = "Patient discussed anxiety and sleep difficulties."
+        self,
+        transcript: str = "Patient discussed anxiety and sleep difficulties.",
+        raises: Exception | None = None,
     ) -> None:
         self._transcript = transcript
+        self._raises = raises
 
     async def transcribe(self, audio_bytes: bytes, filename: str) -> str:
+        if self._raises:
+            raise self._raises
         return self._transcript

@@ -145,8 +145,10 @@ Only the file extension is validated (`.wav`, `.mp3`, `.m4a`) — not the `Conte
 
 Tests are split into two layers:
 
-- **Unit tests** (`tests/unit/`) — test service/business logic in isolation using mocked repositories. No database, no HTTP.
-- **Integration tests** (`tests/integration/`) — test full request/response cycles against a real PostgreSQL 16 instance spun up automatically via `testcontainers`.
+- **Unit tests** (`tests/unit/`) — test service and business logic in isolation using mocked repositories. No database, no HTTP. This covers all service methods (notes, patients, sessions, providers), JWT authentication paths (valid token, malformed token, unknown provider), schema validation rules, and the full pipeline state machine including failure branches and transcript preservation.
+- **Integration tests** (`tests/integration/`) — test full request/response cycles against a real PostgreSQL 16 instance spun up automatically via `testcontainers`. These verify routing, dependency wiring, HTTP status codes, and cross-provider data isolation. Auth is bypassed via `app.dependency_overrides` since the JWT decode path is already covered by unit tests.
+
+The boundary is intentional: business logic and auth correctness belong in unit tests (fast, no infrastructure, precise assertions); HTTP contracts and data isolation belong in integration tests (real DB, real queries, proves the layers wire together correctly).
 
 Run all tests with:
 ```bash
@@ -167,7 +169,13 @@ SQLAlchemy's async session context manager calls `session.close()` on exit, whic
 All timestamp columns use `TIMESTAMP WITH TIME ZONE` (`DateTime(timezone=True)` in SQLAlchemy). This avoids the common bug of storing timezone-naive datetimes and later being unable to reason about them in a multi-timezone context. The `onupdate` on `Note.updated_at` uses a Python-side callable (`lambda: datetime.now(UTC)`) rather than a server-side `func.now()`, so the ORM fires it automatically on attribute mutations and the updated value is reflected in the Python object without an extra `refresh()`.
 
 **Testing without a real auth flow**
-Integration tests bypass JWT entirely by overriding `get_current_provider` via `app.dependency_overrides`. This keeps tests fast and isolated from token generation details, but means the real JWT decode path is not exercised by the integration suite. A dedicated auth integration test (valid token, malformed token, unknown provider) covers that gap separately.
+Integration tests bypass JWT entirely by overriding `get_current_provider` via `app.dependency_overrides`. This keeps tests fast and isolated from token generation details. The JWT decode path — valid token, malformed token, wrong signing key, unknown provider — is covered by dedicated unit tests in `tests/unit/test_auth.py` that call `get_current_provider` directly with mocked credentials and a mocked DB, with no HTTP layer involved.
+
+**JWT tokens have no expiry — by design**
+Tokens are issued without an `exp` claim intentionally. The purpose is to keep a stable token active for local development and manual API testing without needing to re-register a provider or refresh credentials. In production, tokens would carry a short expiry and a refresh mechanism would be provided. The current design is a conscious trade-off: zero friction for development, not suitable for a production auth system.
 
 **`data/tokens.json` as a dev convenience**
 Storing tokens in a file is intentionally a development convenience, not a production auth store. In production, providers would authenticate through a proper identity system and tokens would not be written to disk. The file is excluded from git via `.gitignore`.
+
+**No audio file persistence**
+Audio bytes are read in the route handler, passed to the background pipeline as `bytes`, and discarded once the pipeline completes. Only the transcript and structured insights are stored. This is a deliberate simplification for this assessment — the focus is on the pipeline architecture, not storage infrastructure. In a production clinical system this would be unacceptable: session recordings are irreproducible. A provider cannot re-create a therapy session that already happened. The production approach would be to write the audio to durable object storage (S3, GCS) immediately on upload, before the pipeline starts, so that a transcription failure does not result in permanent data loss. The client would not need to re-upload — the pipeline could be retried directly from the stored file.

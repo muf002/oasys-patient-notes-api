@@ -50,7 +50,11 @@ class SessionRepository:
         return result.scalar_one_or_none()
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, status: SessionStatus | None = None
+        self,
+        patient_id: uuid.UUID,
+        status: SessionStatus | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[AudioSession]:
         query = select(AudioSession).where(
             AudioSession.patient_id == patient_id,
@@ -58,7 +62,7 @@ class SessionRepository:
         )
         if status is not None:
             query = query.where(AudioSession.status == status)
-        query = query.order_by(AudioSession.session_date.desc())
+        query = query.order_by(AudioSession.session_date.desc()).limit(limit).offset(offset)
         result = await self._session.execute(query)
         return list(result.scalars().all())
 

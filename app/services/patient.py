@@ -31,6 +31,8 @@ class PatientService:
             raise PatientNotFoundError()
         return PatientResponse.model_validate(patient)
 
-    async def list_patients(self, provider_id: uuid.UUID) -> list[PatientResponse]:
-        patients = await self._patient_repo.list_for_provider(provider_id)
+    async def list_patients(
+        self, provider_id: uuid.UUID, limit: int = 10, offset: int = 0
+    ) -> list[PatientResponse]:
+        patients = await self._patient_repo.list_for_provider(provider_id, limit, offset)
         return [PatientResponse.model_validate(p) for p in patients]

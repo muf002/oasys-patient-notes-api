@@ -81,8 +81,10 @@ async def list_sessions(
     service: Annotated[SessionService, Depends(get_session_service)],
     current_provider: Annotated[Provider, Depends(get_current_provider)],
     session_status: Annotated[SessionStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[SessionResponse]:
-    return await service.list_sessions(current_provider.id, patient_id, session_status)
+    return await service.list_sessions(current_provider.id, patient_id, session_status, limit, offset)
 
 
 @router.get("/{patient_id}/sessions/{session_id}", response_model=SessionResponse)

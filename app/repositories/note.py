@@ -41,7 +41,11 @@ class NoteRepository:
         return result.scalar_one_or_none()
 
     async def list_for_patient(
-        self, patient_id: uuid.UUID, note_type: NoteType | None = None
+        self,
+        patient_id: uuid.UUID,
+        note_type: NoteType | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[Note]:
         query = select(Note).where(
             Note.patient_id == patient_id,
@@ -49,7 +53,7 @@ class NoteRepository:
         )
         if note_type is not None:
             query = query.where(Note.note_type == note_type)
-        query = query.order_by(Note.session_date.desc())
+        query = query.order_by(Note.session_date.desc()).limit(limit).offset(offset)
         result = await self._session.execute(query)
         return list(result.scalars().all())
 

@@ -31,11 +31,15 @@ class PatientRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_for_provider(self, provider_id: uuid.UUID) -> list[Patient]:
+    async def list_for_provider(
+        self, provider_id: uuid.UUID, limit: int = 10, offset: int = 0
+    ) -> list[Patient]:
         result = await self._session.execute(
             select(Patient)
             .where(Patient.provider_id == provider_id)
             .order_by(Patient.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
         return list(result.scalars().all())
 

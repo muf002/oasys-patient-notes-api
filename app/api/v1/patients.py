@@ -42,8 +42,10 @@ async def create_patient(
 async def list_patients(
     service: Annotated[PatientService, Depends(get_patient_service)],
     current_provider: Annotated[Provider, Depends(get_current_provider)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PatientResponse]:
-    return await service.list_patients(current_provider.id)
+    return await service.list_patients(current_provider.id, limit, offset)
 
 
 @router.get("/{patient_id}", response_model=PatientResponse)
@@ -76,8 +78,10 @@ async def list_notes(
     service: Annotated[NoteService, Depends(get_note_service)],
     current_provider: Annotated[Provider, Depends(get_current_provider)],
     note_type: Annotated[NoteType | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+    offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[NoteResponse]:
-    return await service.list_notes(current_provider.id, patient_id, note_type)
+    return await service.list_notes(current_provider.id, patient_id, note_type, limit, offset)
 
 
 @router.post("/{patient_id}/notes/bulk", response_model=BulkNoteCreateResponse, status_code=207)

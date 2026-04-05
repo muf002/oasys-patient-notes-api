@@ -73,9 +73,11 @@ class SessionService:
         provider_id: uuid.UUID,
         patient_id: uuid.UUID,
         status: SessionStatus | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[SessionResponse]:
         await self._require_patient(patient_id, provider_id)
-        sessions = await self._session_repo.list_for_patient(patient_id, status)
+        sessions = await self._session_repo.list_for_patient(patient_id, status, limit, offset)
         return [SessionResponse.model_validate(s) for s in sessions]
 
     async def run_pipeline(self, session_id: uuid.UUID, audio_bytes: bytes) -> None:

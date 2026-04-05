@@ -57,9 +57,11 @@ class NoteService:
         provider_id: uuid.UUID,
         patient_id: uuid.UUID,
         note_type: NoteType | None = None,
+        limit: int = 10,
+        offset: int = 0,
     ) -> list[NoteResponse]:
         await self._require_patient(patient_id, provider_id)
-        notes = await self._note_repo.list_for_patient(patient_id, note_type)
+        notes = await self._note_repo.list_for_patient(patient_id, note_type, limit, offset)
         return [NoteResponse.model_validate(n) for n in notes]
 
     async def update_note(
