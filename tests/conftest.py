@@ -196,8 +196,10 @@ async def auth_client_a_with_stubs(
     def _override_session_service(
         db: Annotated[AsyncSession, Depends(get_async_session)],
     ) -> SessionService:
+        session_repo = SessionRepository(db)
+        session_repo.commit = AsyncMock()  # type: ignore[method-assign]
         service = SessionService(
-            session_repo=SessionRepository(db),
+            session_repo=session_repo,
             patient_repo=PatientRepository(db),
             transcription_provider=StubTranscriber(),
             insights_provider=StubInsightsGenerator(),
