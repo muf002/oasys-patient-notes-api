@@ -3,6 +3,8 @@ from typing import Any, Protocol
 
 from groq import Groq
 
+from app.core.constants import GROQ_TRANSCRIPTION_FORMAT, GROQ_WHISPER_MODEL
+
 
 class TranscriptionProvider(Protocol):
     async def transcribe(self, audio_bytes: bytes, filename: str) -> str: ...
@@ -16,8 +18,8 @@ class GroqWhisperTranscriber:
         response: Any = await asyncio.to_thread(
             lambda: self._client.audio.transcriptions.create(
                 file=(filename, audio_bytes),
-                model="whisper-large-v3-turbo",
-                response_format="text",
+                model=GROQ_WHISPER_MODEL,
+                response_format=GROQ_TRANSCRIPTION_FORMAT,
             )
         )
         return str(response)

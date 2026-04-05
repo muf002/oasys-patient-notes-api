@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.patient import Patient
@@ -48,4 +48,3 @@ class PatientRepository:
             select(Patient.id).where(Patient.provider_id == provider_id)
         )
         return list(result.scalars().all())
-

@@ -67,5 +67,3 @@ class TestNoteUpdate:
     def test_empty_content_rejected_on_update(self) -> None:
         with pytest.raises(ValueError):
             NoteUpdate(content="")
-
-

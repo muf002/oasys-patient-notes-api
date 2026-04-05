@@ -5,6 +5,13 @@ import uuid
 
 from pydantic import ValidationError
 
+from app.core.constants import (
+    CSV_REQUIRED_HEADERS,
+    DEFAULT_PAGE_LIMIT,
+    DEFAULT_PAGE_OFFSET,
+    ERR_CSV_MISSING_HEADERS,
+    ERR_CSV_NO_DATA,
+)
 from app.core.exceptions import InvalidCSVError, NoteNotFoundError, PatientNotFoundError
 from app.models.note import NoteType
 from app.repositories.note import NoteRepository
@@ -58,8 +65,8 @@ class NoteService:
         provider_id: uuid.UUID,
         patient_id: uuid.UUID,
         note_type: NoteType | None = None,
-        limit: int = 10,
-        offset: int = 0,
+        limit: int = DEFAULT_PAGE_LIMIT,
+        offset: int = DEFAULT_PAGE_OFFSET,
     ) -> list[NoteResponse]:
         await self._require_patient(patient_id, provider_id)
         notes = await self._note_repo.list_for_patient(patient_id, note_type, limit, offset)
@@ -106,9 +113,8 @@ class NoteService:
             raise InvalidCSVError("File must be UTF-8 encoded") from exc
 
         reader = csv.DictReader(io.StringIO(text))
-        required_headers = {"note_type", "session_date", "content"}
-        if reader.fieldnames is None or not required_headers.issubset(set(reader.fieldnames)):
-            raise InvalidCSVError("CSV must contain headers: note_type, session_date, content")
+        if reader.fieldnames is None or not CSV_REQUIRED_HEADERS.issubset(set(reader.fieldnames)):
+            raise InvalidCSVError(ERR_CSV_MISSING_HEADERS)
 
         valid_items: list[NoteCreate] = []
         failed: list[BulkNoteFailure] = []
@@ -127,7 +133,7 @@ class NoteService:
                 failed.append(BulkNoteFailure(index=i, errors=str(exc)))
 
         if not valid_items and not failed:
-            raise InvalidCSVError("CSV file contains no data rows")
+            raise InvalidCSVError(ERR_CSV_NO_DATA)
 
         created_notes: list[NoteResponse] = []
         if valid_items:

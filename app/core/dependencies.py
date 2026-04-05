@@ -8,6 +8,12 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
+from app.core.constants import (
+    ERR_INVALID_TOKEN,
+    ERR_PROVIDER_NOT_FOUND,
+    JWT_ALGORITHM,
+    JWT_SUBJECT_CLAIM,
+)
 from app.core.database import AsyncSessionFactory, get_async_session
 from app.integrations.insights import GroqInsightsGenerator, InsightsProvider, StubInsightsGenerator
 from app.integrations.transcription import (
@@ -39,14 +45,14 @@ async def get_current_provider(
         payload = jwt.decode(
             credentials.credentials,
             settings.SECRET_KEY,
-            algorithms=["HS256"],
+            algorithms=[JWT_ALGORITHM],
         )
-        provider_id = uuid.UUID(payload["sub"])
+        provider_id = uuid.UUID(payload[JWT_SUBJECT_CLAIM])
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
         logger.warning("JWT validation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or missing token",
+            detail=ERR_INVALID_TOKEN,
         ) from exc
 
     provider = await ProviderRepository(db).get_by_id(provider_id)
@@ -54,7 +60,7 @@ async def get_current_provider(
         logger.warning("Token references unknown provider %s", provider_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Provider not found",
+            detail=ERR_PROVIDER_NOT_FOUND,
         )
     return provider
 
@@ -70,7 +76,9 @@ def get_note_service(db: Annotated[AsyncSession, Depends(get_async_session)]) ->
     )
 
 
-def get_provider_service(db: Annotated[AsyncSession, Depends(get_async_session)]) -> ProviderService:
+def get_provider_service(
+    db: Annotated[AsyncSession, Depends(get_async_session)],
+) -> ProviderService:
     return ProviderService(
         provider_repo=ProviderRepository(db),
         patient_repo=PatientRepository(db),

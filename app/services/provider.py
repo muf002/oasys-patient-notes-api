@@ -8,6 +8,7 @@ import jwt
 from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
+from app.core.constants import JWT_ALGORITHM
 from app.core.exceptions import ProviderEmailConflictError
 from app.models.provider import Provider
 from app.repositories.note import NoteRepository
@@ -25,7 +26,7 @@ def _generate_token(provider_id: uuid.UUID) -> str:
     return jwt.encode(
         {"sub": str(provider_id)},
         settings.SECRET_KEY,
-        algorithm="HS256",
+        algorithm=JWT_ALGORITHM,
     )
 
 
@@ -58,9 +59,9 @@ class ProviderService:
     async def create_provider(self, name: str, email: str) -> ProviderResponse:
         try:
             provider: Provider = await self._provider_repo.create(name=name, email=email)
-        except IntegrityError:
+        except IntegrityError as err:
             logger.warning("Provider creation failed — email already registered: %s", email)
-            raise ProviderEmailConflictError()
+            raise ProviderEmailConflictError() from err
         token = _generate_token(provider.id)
         await asyncio.to_thread(_write_token, provider.name, provider.id, token)
         logger.info("Provider created: %s (%s)", provider.name, provider.id)

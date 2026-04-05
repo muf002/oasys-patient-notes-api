@@ -1,6 +1,5 @@
 import logging
 import uuid
-from datetime import date
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -87,24 +86,22 @@ class SessionService:
         # Tx 1: fetch session, PENDING → TRANSCRIBING
         logger.info("Executing pipeline for session %s", session_id)
         original_filename: str | None = None
-        async with self._session_factory() as db:
-            async with db.begin():
-                repo = SessionRepository(db)
-                session = await repo.get_by_id_internal(session_id)
-                if session is None:
-                    logger.error("Session not found for session %s", session_id)
-                    return
-                original_filename = session.original_filename
-                await repo.update_status(session, SessionStatus.TRANSCRIBING)
+        async with self._session_factory() as db, db.begin():
+            repo = SessionRepository(db)
+            session = await repo.get_by_id_internal(session_id)
+            if session is None:
+                logger.error("Session not found for session %s", session_id)
+                return
+            original_filename = session.original_filename
+            await repo.update_status(session, SessionStatus.TRANSCRIBING)
         # ── no DB transaction held ──────────────────────────────────────────
         if original_filename is None:
             logger.error("Session %s has no original_filename — aborting pipeline", session_id)
-            async with self._session_factory() as db:
-                async with db.begin():
-                    repo = SessionRepository(db)
-                    session = await repo.get_by_id_internal(session_id)
-                    if session:
-                        await repo.set_failed(session, "Pipeline aborted: missing original filename")
+            async with self._session_factory() as db, db.begin():
+                repo = SessionRepository(db)
+                session = await repo.get_by_id_internal(session_id)
+                if session:
+                    await repo.set_failed(session, "Pipeline aborted: missing original filename")
             return
         try:
             transcript = await self._transcription_provider.transcribe(
@@ -113,45 +110,44 @@ class SessionService:
             logger.info("Transcription successful for session %s", session_id)
         except Exception as exc:
             logger.exception("Transcription failed for session %s", session_id)
-            async with self._session_factory() as db:
-                async with db.begin():
-                    repo = SessionRepository(db)
-                    session = await repo.get_by_id_internal(session_id)
-                    if session:
-                        await repo.set_failed(session, f"Transcription failed: {exc}")
-            return
-
-        # Tx 2: save transcript → ANALYZING (single atomic write; transcript preserved even if LLM later fails)
-        async with self._session_factory() as db:
-            async with db.begin():
+            async with self._session_factory() as db, db.begin():
                 repo = SessionRepository(db)
                 session = await repo.get_by_id_internal(session_id)
-                if session is None:
-                    return
-                await repo.update_transcript(session, transcript)
-                await repo.update_status(session, SessionStatus.ANALYZING)
-                logger.info("Transcript saved and status updated to ANALYZING for session %s", session_id)
+                if session:
+                    await repo.set_failed(session, f"Transcription failed: {exc}")
+            return
+
+        # Tx 2: save transcript → ANALYZING
+        # (single atomic write; transcript preserved even if LLM later fails)
+        async with self._session_factory() as db, db.begin():
+            repo = SessionRepository(db)
+            session = await repo.get_by_id_internal(session_id)
+            if session is None:
+                return
+            await repo.update_transcript(session, transcript)
+            await repo.update_status(session, SessionStatus.ANALYZING)
+            logger.info(
+                "Transcript saved and status updated to ANALYZING for session %s", session_id
+            )
         # ── no DB transaction held ──────────────────────────────────────────
         try:
             insights = await self._insights_provider.generate_insights(transcript)
         except Exception as exc:
             logger.exception("Insights generation failed for session %s", session_id)
-            async with self._session_factory() as db:
-                async with db.begin():
-                    repo = SessionRepository(db)
-                    session = await repo.get_by_id_internal(session_id)
-                    if session:
-                        # transcript already committed in Tx 2 — preserved
-                        await repo.set_failed(session, f"Insights generation failed: {exc}")
+            async with self._session_factory() as db, db.begin():
+                repo = SessionRepository(db)
+                session = await repo.get_by_id_internal(session_id)
+                if session:
+                    # transcript already committed in Tx 2 — preserved
+                    await repo.set_failed(session, f"Insights generation failed: {exc}")
             return
 
         # Tx 3: save insights, ANALYZING → COMPLETED
-        async with self._session_factory() as db:
-            async with db.begin():
-                repo = SessionRepository(db)
-                session = await repo.get_by_id_internal(session_id)
-                if session is None:
-                    return
-                await repo.update_insights(session, insights.model_dump())
-                await repo.update_status(session, SessionStatus.COMPLETED)
-                logger.info("Pipeline completed for session %s", session_id)
+        async with self._session_factory() as db, db.begin():
+            repo = SessionRepository(db)
+            session = await repo.get_by_id_internal(session_id)
+            if session is None:
+                return
+            await repo.update_insights(session, insights.model_dump())
+            await repo.update_status(session, SessionStatus.COMPLETED)
+            logger.info("Pipeline completed for session %s", session_id)

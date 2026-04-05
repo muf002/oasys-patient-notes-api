@@ -30,9 +30,7 @@ class SessionRepository:
         await self._session.refresh(audio_session)
         return audio_session
 
-    async def get_by_id(
-        self, session_id: uuid.UUID, patient_id: uuid.UUID
-    ) -> AudioSession | None:
+    async def get_by_id(self, session_id: uuid.UUID, patient_id: uuid.UUID) -> AudioSession | None:
         result = await self._session.execute(
             select(AudioSession).where(
                 AudioSession.id == session_id,
@@ -74,9 +72,7 @@ class SessionRepository:
         await self._session.refresh(audio_session)
         return audio_session
 
-    async def update_transcript(
-        self, audio_session: AudioSession, transcript: str
-    ) -> AudioSession:
+    async def update_transcript(self, audio_session: AudioSession, transcript: str) -> AudioSession:
         audio_session.transcript = transcript
         await self._session.flush()
         await self._session.refresh(audio_session)
@@ -90,9 +86,7 @@ class SessionRepository:
         await self._session.refresh(audio_session)
         return audio_session
 
-    async def set_failed(
-        self, audio_session: AudioSession, error_message: str
-    ) -> AudioSession:
+    async def set_failed(self, audio_session: AudioSession, error_message: str) -> AudioSession:
         audio_session.status = SessionStatus.FAILED
         audio_session.error_message = error_message
         await self._session.flush()

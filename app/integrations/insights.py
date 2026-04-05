@@ -5,6 +5,14 @@ from groq import Groq, RateLimitError
 from pydantic import BaseModel, ValidationError
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from app.core.constants import (
+    ERR_LLM_EMPTY_RESPONSE,
+    GROQ_LLM_MODEL,
+    LLM_MAX_RETRIES,
+    LLM_RETRY_MAX_WAIT,
+    LLM_RETRY_MIN_WAIT,
+    LLM_RETRY_MULTIPLIER,
+)
 
 CLINICAL_INSIGHTS_SYSTEM_PROMPT = """\
 You are a clinical documentation assistant trained to analyze psychotherapy session transcripts.
@@ -46,14 +54,16 @@ class GroqInsightsGenerator:
         self._client = Groq(api_key=api_key)
 
     @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
+        stop=stop_after_attempt(LLM_MAX_RETRIES),
+        wait=wait_exponential(
+            multiplier=LLM_RETRY_MULTIPLIER, min=LLM_RETRY_MIN_WAIT, max=LLM_RETRY_MAX_WAIT
+        ),
         retry=retry_if_exception_type((RateLimitError, ValidationError)),
     )
     async def _call_with_retry(self, transcript: str) -> ClinicalInsights:
         raw: Any = await asyncio.to_thread(
             lambda: self._client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
+                model=GROQ_LLM_MODEL,
                 messages=[
                     {"role": "system", "content": CLINICAL_INSIGHTS_SYSTEM_PROMPT},
                     {"role": "user", "content": transcript},
@@ -63,7 +73,7 @@ class GroqInsightsGenerator:
         )
         content: str | None = raw.choices[0].message.content
         if content is None:
-            raise ValueError("LLM returned empty response")
+            raise ValueError(ERR_LLM_EMPTY_RESPONSE)
         return ClinicalInsights.model_validate_json(content)
 
     async def generate_insights(self, transcript: str) -> ClinicalInsights:

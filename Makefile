@@ -1,4 +1,4 @@
-.PHONY: run down shell test lint format typecheck migrate migration seed
+.PHONY: run down shell test lint format typecheck check migrate migration seed
 
 run:
 	docker compose up --build
@@ -20,6 +20,8 @@ format:
 
 typecheck:
 	uv run mypy app/
+
+check: lint typecheck
 
 migrate:
 	docker compose exec app uv run alembic upgrade head

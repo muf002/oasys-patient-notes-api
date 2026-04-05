@@ -67,9 +67,7 @@ class TestGetCurrentProvider:
 
         assert exc_info.value.status_code == 401
 
-    async def test_valid_token_but_provider_not_in_db_raises_401(
-        self, mock_db: AsyncMock
-    ) -> None:
+    async def test_valid_token_but_provider_not_in_db_raises_401(self, mock_db: AsyncMock) -> None:
         token = _make_token({"sub": str(uuid.uuid4())})
 
         with (

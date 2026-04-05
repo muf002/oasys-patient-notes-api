@@ -4,10 +4,28 @@ from datetime import date
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    UploadFile,
+    status,
+)
 from pydantic import ValidationError
 
 from app.core.config import settings
+from app.core.constants import (
+    ALLOWED_AUDIO_EXTENSIONS,
+    AUDIO_CHUNK_SIZE,
+    DEFAULT_PAGE_LIMIT,
+    DEFAULT_PAGE_OFFSET,
+    ERR_SESSION_DATE_FUTURE,
+    MAX_PAGE_LIMIT,
+)
 from app.core.dependencies import get_current_provider, get_session_service
 from app.models.provider import Provider
 from app.models.session import SessionStatus
@@ -17,15 +35,12 @@ from app.services.session import SessionService
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/patients", tags=["sessions"])
 
-_ALLOWED_EXTENSIONS = {".wav", ".mp3", ".m4a"}
-_CHUNK_SIZE = 1024 * 1024  # 1 MB
-
 
 async def _read_audio_with_size_limit(audio_file: UploadFile, max_size_mb: int) -> bytes:
     max_bytes = max_size_mb * 1024 * 1024
     chunks: list[bytes] = []
     total = 0
-    while chunk := await audio_file.read(_CHUNK_SIZE):
+    while chunk := await audio_file.read(AUDIO_CHUNK_SIZE):
         total += len(chunk)
         if total > max_bytes:
             raise HTTPException(
@@ -47,10 +62,12 @@ async def upload_session(
 ) -> SessionResponse:
     logger.info("Uploading session for patient %s", patient_id)
     suffix = Path(audio_file.filename or "").suffix.lower()
-    if suffix not in _ALLOWED_EXTENSIONS:
+    if suffix not in ALLOWED_AUDIO_EXTENSIONS:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Unsupported audio format. Allowed: {', '.join(sorted(_ALLOWED_EXTENSIONS))}",
+            detail=(
+                f"Unsupported audio format. Allowed: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}"
+            ),
         )
 
     audio_bytes = await _read_audio_with_size_limit(audio_file, settings.AUDIO_MAX_SIZE_MB)
@@ -60,8 +77,8 @@ async def upload_session(
     except ValidationError:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="session_date cannot be in the future",
-        )
+            detail=ERR_SESSION_DATE_FUTURE,
+        ) from None
 
     response = await service.create_session(
         provider_id=current_provider.id,
@@ -81,10 +98,12 @@ async def list_sessions(
     service: Annotated[SessionService, Depends(get_session_service)],
     current_provider: Annotated[Provider, Depends(get_current_provider)],
     session_status: Annotated[SessionStatus | None, Query(alias="status")] = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 10,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=MAX_PAGE_LIMIT)] = DEFAULT_PAGE_LIMIT,
+    offset: Annotated[int, Query(ge=0)] = DEFAULT_PAGE_OFFSET,
 ) -> list[SessionResponse]:
-    return await service.list_sessions(current_provider.id, patient_id, session_status, limit, offset)
+    return await service.list_sessions(
+        current_provider.id, patient_id, session_status, limit, offset
+    )
 
 
 @router.get("/{patient_id}/sessions/{session_id}", response_model=SessionResponse)

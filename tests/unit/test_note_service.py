@@ -191,7 +191,11 @@ class TestBulkCreateNotes:
 
         csv_bytes = _make_csv(
             {"note_type": "intake", "session_date": "2024-01-01", "content": "Intake note."},
-            {"note_type": "progress_note", "session_date": "2024-02-01", "content": "Progress note."},
+            {
+                "note_type": "progress_note",
+                "session_date": "2024-02-01",
+                "content": "Progress note.",
+            },
         )
         result = await service.bulk_create_notes(provider_id, patient_id, csv_bytes)
 

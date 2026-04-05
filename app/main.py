@@ -3,6 +3,12 @@ import logging
 from fastapi import FastAPI, HTTPException, Request, status
 
 from app.api.v1.router import router as v1_router
+from app.core.constants import (
+    ERR_EMAIL_ALREADY_REGISTERED,
+    ERR_NOTE_NOT_FOUND,
+    ERR_PATIENT_NOT_FOUND,
+    ERR_SESSION_NOT_FOUND,
+)
 from app.core.exceptions import (
     InvalidCSVError,
     NoteNotFoundError,
@@ -31,21 +37,23 @@ def create_app() -> FastAPI:
 
     @app.exception_handler(PatientNotFoundError)
     async def patient_not_found_handler(request: Request, exc: PatientNotFoundError) -> None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Patient not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERR_PATIENT_NOT_FOUND)
 
     @app.exception_handler(NoteNotFoundError)
     async def note_not_found_handler(request: Request, exc: NoteNotFoundError) -> None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERR_NOTE_NOT_FOUND)
 
     @app.exception_handler(SessionNotFoundError)
     async def session_not_found_handler(request: Request, exc: SessionNotFoundError) -> None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=ERR_SESSION_NOT_FOUND)
 
     @app.exception_handler(ProviderEmailConflictError)
     async def provider_email_conflict_handler(
         request: Request, exc: ProviderEmailConflictError
     ) -> None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail=ERR_EMAIL_ALREADY_REGISTERED
+        )
 
     @app.exception_handler(InvalidCSVError)
     async def invalid_csv_handler(request: Request, exc: InvalidCSVError) -> None:

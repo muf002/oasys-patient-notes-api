@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.core.exceptions import PatientNotFoundError, SessionNotFoundError
-from app.integrations.insights import ClinicalInsights, StubInsightsGenerator
+from app.integrations.insights import StubInsightsGenerator
 from app.integrations.transcription import StubTranscriber
 from app.models.patient import Patient
 from app.models.session import AudioSession, SessionStatus
@@ -201,7 +201,11 @@ class TestExecutePipeline:
             await service._execute_pipeline(uuid.uuid4(), b"audio data")
 
         statuses = [call.args[1] for call in mock_repo.update_status.call_args_list]
-        assert statuses == [SessionStatus.TRANSCRIBING, SessionStatus.ANALYZING, SessionStatus.COMPLETED]
+        assert statuses == [
+            SessionStatus.TRANSCRIBING,
+            SessionStatus.ANALYZING,
+            SessionStatus.COMPLETED,
+        ]
 
     async def test_transcription_failure_sets_failed_status(
         self,

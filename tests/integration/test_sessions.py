@@ -6,7 +6,6 @@ import pytest
 from httpx import AsyncClient
 
 import app.api.v1.sessions as sessions_module
-from app.core.config import settings
 
 
 async def _create_patient(client: AsyncClient) -> dict:
@@ -137,15 +136,11 @@ class TestListSessions:
         await _upload_session(auth_client_a_with_stubs, patient["id"])
         await _upload_session(auth_client_a_with_stubs, patient["id"])
 
-        resp = await auth_client_a_with_stubs.get(
-            f"/api/v1/patients/{patient['id']}/sessions"
-        )
+        resp = await auth_client_a_with_stubs.get(f"/api/v1/patients/{patient['id']}/sessions")
         assert resp.status_code == 200
         assert len(resp.json()) == 2
 
-    async def test_filters_by_status(
-        self, auth_client_a_with_stubs: AsyncClient
-    ) -> None:
+    async def test_filters_by_status(self, auth_client_a_with_stubs: AsyncClient) -> None:
         patient = await _create_patient(auth_client_a_with_stubs)
         await _upload_session(auth_client_a_with_stubs, patient["id"])
 

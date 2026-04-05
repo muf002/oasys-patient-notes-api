@@ -176,7 +176,9 @@ def stub_insights_generator() -> StubInsightsGenerator:
 
 @pytest.fixture
 async def auth_client_a_with_stubs(
-    db_session: AsyncSession, db_engine, provider_a: Provider  # type: ignore[no-untyped-def]
+    db_session: AsyncSession,
+    db_engine,
+    provider_a: Provider,  # type: ignore[no-untyped-def]
 ) -> AsyncGenerator[AsyncClient, None]:
     """Provider A client with stub providers and run_pipeline suppressed via AsyncMock.
 
