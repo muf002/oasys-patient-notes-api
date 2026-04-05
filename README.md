@@ -25,10 +25,7 @@ A Python backend that models a simplified patient notes system with provider-sco
    The API will be available at `http://localhost:8000`.
    Interactive docs at `http://localhost:8000/docs`.
 
-3. Run database migrations (requires the stack to be running):
-   ```bash
-   make migrate
-   ```
+3. On first start, `scripts/startup.py` runs automatically inside the container before the server comes up. It applies all pending Alembic migrations and seeds the database with two providers and sample patients. Auth tokens for each provider are written to `data/tokens.json` — use these to authenticate against the API. If the database is already seeded, the script skips insertion and only regenerates `tokens.json` if it is missing.
 
 4. To stop the stack:
    ```bash
@@ -80,7 +77,7 @@ HTTP Request
 
 - **Explicit dependencies** — services receive repos via constructor injection; routers receive services via FastAPI `Depends`. Nothing is imported globally or looked up.
 - **Domain exceptions** — services raise `PatientNotFoundError` / `NoteNotFoundError` (plain Python exceptions). Global handlers in `main.py` translate these to HTTP responses. The service layer has no FastAPI imports.
-- **Cross-provider isolation** — every patient lookup includes `provider_id` as a WHERE condition. A provider can never retrieve, modify, or delete another provider's data — even if they know the UUID — because the query simply returns nothing.
+- **Cross-provider isolation** — every patient lookup includes `provider_id` as a WHERE condition. A provider can never retrieve, modify, or delete another provider's data because the query simply returns nothing.
 - **Soft delete** — `Note.deleted_at` is set to the current timestamp rather than physically deleting the row. All queries filter `deleted_at IS NULL`.
 - **Bulk import via CSV** — `POST /patients/{id}/notes/bulk` accepts a `multipart/form-data` CSV file upload. This reflects the actual use case: a provider importing historical notes from an EHR or spreadsheet export, not a developer hand-authoring a JSON array. The router validates the file extension; the service decodes, parses, and validates each row independently, returning a 207 with separate `created` and `failed` lists.
 - **Async throughout** — SQLAlchemy async engine with `asyncpg`, all repository and service methods are `async def`.
@@ -143,12 +140,13 @@ Only the file extension is validated (`.wav`, `.mp3`, `.m4a`) — not the `Conte
 
 ## Testing Strategy
 
+
 Tests are split into two layers:
 
-- **Unit tests** (`tests/unit/`) — test service and business logic in isolation using mocked repositories. No database, no HTTP. This covers all service methods (notes, patients, sessions, providers), JWT authentication paths (valid token, malformed token, unknown provider), schema validation rules, and the full pipeline state machine including failure branches and transcript preservation.
+- **Unit tests** (`tests/unit/`) — test service and business logic in isolation using mocked repositories. This covers all service methods, JWT authentication paths, schema validation rules, and the full pipeline state machine including failure branches and transcript preservation.
 - **Integration tests** (`tests/integration/`) — test full request/response cycles against a real PostgreSQL 16 instance spun up automatically via `testcontainers`. These verify routing, dependency wiring, HTTP status codes, and cross-provider data isolation. Auth is bypassed via `app.dependency_overrides` since the JWT decode path is already covered by unit tests.
 
-The boundary is intentional: business logic and auth correctness belong in unit tests (fast, no infrastructure, precise assertions); HTTP contracts and data isolation belong in integration tests (real DB, real queries, proves the layers wire together correctly).
+The boundary is intentional: business logic and auth correctness belong in unit tests; HTTP contracts and data isolation belong in integration tests.
 
 Run all tests with:
 ```bash
@@ -160,18 +158,18 @@ make test
 ## Challenges & Trade-offs
 
 **Bulk import via CSV file upload**
-The bulk note creation endpoint accepts a CSV file (`multipart/form-data`) rather than a JSON body. This matches the actual use case described in the requirements — importing historical notes — where a provider exports from an EHR or spreadsheet and uploads the file directly. No one hand-authors a JSON array of 50 clinical notes.
+The bulk note creation endpoint accepts a CSV file (`multipart/form-data`) rather than a JSON body. This matches the actual use case described in the requirements — importing historical notes — where a provider exports from an EHR or spreadsheet and uploads the file directly.
 
 The CSV must contain three columns: `note_type`, `session_date`, `content`. RFC 4180 quoting is fully supported, so `content` fields containing commas or newlines are handled correctly by Python's `csv.DictReader`. The service validates each row independently via Pydantic and returns a `207` response with separate `created` and `failed` lists, so a single bad row does not block the rest of the import. Structural errors (missing headers, non-UTF-8 encoding, empty file) raise `InvalidCSVError`, translated to `400` by the global exception handler.
+
+**BackgroundTasks vs Celery for the audio pipeline**
+`POST /sessions` returns a `202` immediately and offloads transcription and insight generation to FastAPI's `BackgroundTasks`. This requires zero extra infrastructure which is the right call for this scope. The trade-off is durability: `BackgroundTasks` runs in the same process as the web server, so if the server restarts mid-pipeline the task is silently lost and the session stays stuck in `transcribing` or `analyzing`. Transient Groq rate limits are handled by `tenacity` retries inside the pipeline before any exception propagates, but a process crash cannot be recovered from. In production, the pipeline should be moved to Celery with a Redis or RabbitMQ broker. Celery tasks are persisted to the broker before execution, so a worker crash results in the task being requeued rather than lost.
 
 **Transaction commit placement**
 SQLAlchemy's async session context manager calls `session.close()` on exit, which rolls back any uncommitted transaction. Repositories use `flush()` (not `commit()`) to write within the current transaction and get server-generated values back. The commit must happen at the request boundary, not inside individual repo methods — otherwise a multi-step service operation (e.g. verify patient → create note) would commit after the first step. The solution is wrapping the yielded session in `async with session.begin()` inside `get_async_session`, which auto-commits on clean exit and auto-rolls back on exception.
 
 **Timezone-aware datetimes**
 All timestamp columns use `TIMESTAMP WITH TIME ZONE` (`DateTime(timezone=True)` in SQLAlchemy). This avoids the common bug of storing timezone-naive datetimes and later being unable to reason about them in a multi-timezone context. The `onupdate` on `Note.updated_at` uses a Python-side callable (`lambda: datetime.now(UTC)`) rather than a server-side `func.now()`, so the ORM fires it automatically on attribute mutations and the updated value is reflected in the Python object without an extra `refresh()`.
-
-**Testing without a real auth flow**
-Integration tests bypass JWT entirely by overriding `get_current_provider` via `app.dependency_overrides`. This keeps tests fast and isolated from token generation details. The JWT decode path — valid token, malformed token, wrong signing key, unknown provider — is covered by dedicated unit tests in `tests/unit/test_auth.py` that call `get_current_provider` directly with mocked credentials and a mocked DB, with no HTTP layer involved.
 
 **JWT tokens have no expiry — by design**
 Tokens are issued without an `exp` claim intentionally. The purpose is to keep a stable token active for local development and manual API testing without needing to re-register a provider or refresh credentials. In production, tokens would carry a short expiry and a refresh mechanism would be provided. The current design is a conscious trade-off: zero friction for development, not suitable for a production auth system.
@@ -180,4 +178,4 @@ Tokens are issued without an `exp` claim intentionally. The purpose is to keep a
 Storing tokens in a file is intentionally a development convenience, not a production auth store. In production, providers would authenticate through a proper identity system and tokens would not be written to disk. The file is excluded from git via `.gitignore`.
 
 **No audio file persistence**
-Audio bytes are read in the route handler, passed to the background pipeline as `bytes`, and discarded once the pipeline completes. Only the transcript and structured insights are stored. This is a deliberate simplification for this assessment — the focus is on the pipeline architecture, not storage infrastructure. In a production clinical system this would be unacceptable: session recordings are irreproducible. A provider cannot re-create a therapy session that already happened. The production approach would be to write the audio to durable object storage (S3, GCS) immediately on upload, before the pipeline starts, so that a transcription failure does not result in permanent data loss. The client would not need to re-upload — the pipeline could be retried directly from the stored file.
+Audio bytes are read in the route handler, passed to the background pipeline as `bytes`, and discarded once the pipeline completes. Only the transcript and structured insights are stored. This is a deliberate simplification for this assessment — the focus is on the pipeline architecture, not storage infrastructure. The production approach would be to write the audio to durable object storage (S3, GCS) immediately on upload, before the pipeline starts, so that a transcription failure does not result in permanent data loss. The client would not need to re-upload — the pipeline could be retried directly from the stored file.
