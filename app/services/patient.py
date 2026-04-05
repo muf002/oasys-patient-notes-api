@@ -1,6 +1,9 @@
+import logging
 import uuid
 
 from app.core.exceptions import PatientNotFoundError
+
+logger = logging.getLogger(__name__)
 from app.repositories.patient import PatientRepository
 from app.schemas.patient import PatientResponse
 
@@ -17,6 +20,7 @@ class PatientService:
             first_name=first_name,
             last_name=last_name,
         )
+        logger.info("Patient created: %s for provider %s", patient.id, provider_id)
         return PatientResponse.model_validate(patient)
 
     async def get_patient(

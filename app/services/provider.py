@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,8 @@ from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
 from app.repositories.provider import ProviderRepository
 from app.schemas.provider import ProviderResponse, ProviderStatsResponse
+
+logger = logging.getLogger(__name__)
 
 TOKENS_FILE = Path("data/tokens.json")
 
@@ -34,6 +37,7 @@ def _write_token(provider_name: str, provider_id: uuid.UUID, token: str) -> None
         try:
             data = json.loads(TOKENS_FILE.read_text())
         except (json.JSONDecodeError, OSError):
+            logger.warning("Could not read existing tokens file %s — starting fresh", TOKENS_FILE)
             data = {}
     key = f"{provider_name} ({provider_id})"
     data[key] = token
@@ -55,9 +59,11 @@ class ProviderService:
         try:
             provider: Provider = await self._provider_repo.create(name=name, email=email)
         except IntegrityError:
+            logger.warning("Provider creation failed — email already registered: %s", email)
             raise ProviderEmailConflictError()
         token = _generate_token(provider.id)
         await asyncio.to_thread(_write_token, provider.name, provider.id, token)
+        logger.info("Provider created: %s (%s)", provider.name, provider.id)
         return ProviderResponse(
             id=provider.id,
             name=provider.name,

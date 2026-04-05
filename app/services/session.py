@@ -53,6 +53,7 @@ class SessionService:
         # connections (READ COMMITTED). BackgroundTasks run inside the request
         # lifecycle before the dependency-managed transaction commits.
         await self._session_repo.commit()
+        logger.info("Session %s created for patient %s", audio_session.id, patient_id)
         return SessionResponse.model_validate(audio_session)
 
     async def get_session(
@@ -151,3 +152,4 @@ class SessionService:
                     return
                 await repo.update_insights(session, insights.model_dump())
                 await repo.update_status(session, SessionStatus.COMPLETED)
+                logger.info("Pipeline completed for session %s", session_id)

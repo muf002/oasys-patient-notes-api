@@ -156,14 +156,14 @@ class TestProviderStats:
         await _create_note(auth_client_a, patient_a["id"])
 
         # Provider B has no data
-        resp_b = await auth_client_b.get("/api/v1/providers/me/stats")
+        resp_b = await auth_client_b.get("/api/v1/providers/stats")
         assert resp_b.status_code == 200
         stats_b = resp_b.json()
         assert stats_b["total_patients"] == 0
         assert stats_b["total_notes"] == 0
 
         # Provider A has 1 patient, 2 notes
-        resp_a = await auth_client_a.get("/api/v1/providers/me/stats")
+        resp_a = await auth_client_a.get("/api/v1/providers/stats")
         assert resp_a.status_code == 200
         stats_a = resp_a.json()
         assert stats_a["total_patients"] == 1

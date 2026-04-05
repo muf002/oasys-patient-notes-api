@@ -1,5 +1,5 @@
+import logging
 import uuid
-from collections.abc import AsyncGenerator
 from typing import Annotated
 
 import jwt
@@ -25,18 +25,14 @@ from app.services.patient import PatientService
 from app.services.provider import ProviderService
 from app.services.session import SessionService
 
+logger = logging.getLogger(__name__)
+
 security = HTTPBearer()
-
-
-async def get_db(
-    session: Annotated[AsyncSession, Depends(get_async_session)],
-) -> AsyncGenerator[AsyncSession, None]:
-    yield session
 
 
 async def get_current_provider(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(security)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
 ) -> Provider:
     """Decode Bearer JWT, extract provider_id, return Provider from DB."""
     try:
@@ -47,6 +43,7 @@ async def get_current_provider(
         )
         provider_id = uuid.UUID(payload["sub"])
     except (jwt.PyJWTError, KeyError, ValueError) as exc:
+        logger.warning("JWT validation failed: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing token",
@@ -54,6 +51,7 @@ async def get_current_provider(
 
     provider = await ProviderRepository(db).get_by_id(provider_id)
     if provider is None:
+        logger.warning("Token references unknown provider %s", provider_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Provider not found",
@@ -61,18 +59,18 @@ async def get_current_provider(
     return provider
 
 
-def get_patient_service(db: Annotated[AsyncSession, Depends(get_db)]) -> PatientService:
+def get_patient_service(db: Annotated[AsyncSession, Depends(get_async_session)]) -> PatientService:
     return PatientService(patient_repo=PatientRepository(db))
 
 
-def get_note_service(db: Annotated[AsyncSession, Depends(get_db)]) -> NoteService:
+def get_note_service(db: Annotated[AsyncSession, Depends(get_async_session)]) -> NoteService:
     return NoteService(
         note_repo=NoteRepository(db),
         patient_repo=PatientRepository(db),
     )
 
 
-def get_provider_service(db: Annotated[AsyncSession, Depends(get_db)]) -> ProviderService:
+def get_provider_service(db: Annotated[AsyncSession, Depends(get_async_session)]) -> ProviderService:
     return ProviderService(
         provider_repo=ProviderRepository(db),
         patient_repo=PatientRepository(db),
@@ -97,7 +95,7 @@ def get_insights_provider() -> InsightsProvider:
 
 
 def get_session_service(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_async_session)],
     transcription_provider: Annotated[TranscriptionProvider, Depends(get_transcription_provider)],
     insights_provider: Annotated[InsightsProvider, Depends(get_insights_provider)],
     session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],

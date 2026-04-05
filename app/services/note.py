@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from pydantic import ValidationError
@@ -14,6 +15,8 @@ from app.schemas.note import (
     NoteResponse,
     NoteUpdate,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class NoteService:
@@ -37,6 +40,7 @@ class NoteService:
             content=data.content,
             session_date=data.session_date,
         )
+        logger.info("Note %s created for patient %s", note.id, patient_id)
         return NoteResponse.model_validate(note)
 
     async def get_note(
@@ -75,6 +79,7 @@ class NoteService:
             content=data.content,
             session_date=data.session_date,
         )
+        logger.info("Note %s updated for patient %s", note_id, patient_id)
         return NoteResponse.model_validate(updated)
 
     async def delete_note(
@@ -85,6 +90,7 @@ class NoteService:
         if note is None:
             raise NoteNotFoundError()
         await self._note_repo.soft_delete(note)
+        logger.info("Note %s deleted for patient %s", note_id, patient_id)
 
     async def bulk_create_notes(
         self, provider_id: uuid.UUID, patient_id: uuid.UUID, data: BulkNoteCreate
@@ -111,4 +117,8 @@ class NoteService:
             )
             created_notes = [NoteResponse.model_validate(n) for n in db_notes]
 
+        logger.info(
+            "Bulk note creation for patient %s: %d created, %d failed",
+            patient_id, len(created_notes), len(failed),
+        )
         return BulkNoteCreateResponse(created=created_notes, failed=failed)
