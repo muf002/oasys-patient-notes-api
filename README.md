@@ -96,7 +96,48 @@ Auto-generated docs are available at `/docs` (Swagger UI) and `/redoc` when the 
 
 ## AI & Audio Pipeline Details
 
-_To be completed in Feature 2._
+### Model choices
+
+**Transcription: Groq Whisper (`whisper-large-v3-turbo`)** — free-tier Groq platform, OpenAI-compatible SDK, 25 MB file size limit, fast inference. **LLM: Groq LLaMA 3.3 70B (`llama-3.3-70b-versatile`)** — same free-tier Groq account, supports `response_format={"type": "json_object"}` for guaranteed JSON output, sufficient context window for long transcripts. A single `GROQ_API_KEY` covers both services. The Protocol abstraction (`TranscriptionProvider`, `InsightsProvider`) means swapping to OpenAI Whisper + GPT-4o later is a one-file change.
+
+### Prompt design
+
+The system prompt forces clinically specific output, not generic summaries. Key rules baked into the prompt:
+- `key_themes`: must be specific (e.g. `"occupational stressor: hostile manager"`, not `"work stress"`)
+- `risk_indicators`: evidence-based only — conservative flagging, no speculation from ambiguous statements; empty array if none found
+- `recommended_followups`: concrete and actionable (e.g. `"Explore avoidance behaviors around family conflict"`), not `"continue therapy"`
+- `session_summary`: third-person clinical narrative, no diagnosis
+
+JSON mode at the API call level (`response_format={"type": "json_object"}`) combined with `ClinicalInsights.model_validate_json()` guarantees parseable structured output. Tenacity retries on `RateLimitError` or `ValidationError` (up to 3 attempts, exponential backoff 2–10 s).
+
+### Async pipeline with 202 polling
+
+`POST /sessions` → immediately returns 202 with `status=pending`. FastAPI `BackgroundTasks` runs the pipeline after the response is sent. Clients poll `GET /sessions/{id}` for status changes (`pending → transcribing → analyzing → completed` or `failed`).
+
+**Trade-off:** `BackgroundTasks` has no built-in retry — if the server restarts mid-pipeline, the task is lost and the session stays stuck in `transcribing`/`analyzing`. Production would use Celery + Redis or ARQ. For this assessment, `BackgroundTasks` is the right call: zero extra infrastructure, no broker, and the pipeline completes in seconds. Transient rate limits are handled by `tenacity` retries inside the provider before any exception reaches the pipeline.
+
+### Pipeline state machine and transcript preservation
+
+```
+PENDING → TRANSCRIBING → [Groq Whisper] → ANALYZING → [Groq LLaMA] → COMPLETED
+                       ↘ FAILED                     ↘ FAILED (transcript already committed)
+```
+
+Each state transition is its own DB transaction, committed and closed **before** the next external API call. No DB transaction is ever held open during a Groq API call. If the LLM step fails, `FAILED` is recorded but the transcript from Tx 2 is already committed and preserved in the database — the client can still read it.
+
+### No audio file persistence
+
+Audio bytes are read in the route handler, passed to the background task as `bytes`, then discarded. Only the transcript and insights are stored. **Trade-off:** if transcription fails, the client must re-upload. For a production clinical system, audio would be stored durably since session recordings are irreproducible. For this assessment, the simpler approach keeps the focus on pipeline architecture.
+
+### Content-type validation
+
+Only the file extension is validated (`.wav`, `.mp3`, `.m4a`) — not the `Content-Type` header. Extension spoofing is therefore possible. Accepted as a simplification trade-off.
+
+### Stub providers and auto-fallback
+
+`StubTranscriber` and `StubInsightsGenerator` are deterministic stubs used in two ways:
+1. **Auto-fallback** — when `GROQ_API_KEY` is absent, `get_transcription_provider` and `get_insights_provider` return the stubs automatically. The app runs in any environment without a Groq account.
+2. **Integration tests** — stubs are injected directly, and `run_pipeline` is replaced with `AsyncMock()` to suppress background task execution entirely. Integration tests verify only HTTP contracts; pipeline logic is covered by unit tests with mocked repos.
 
 ---
 

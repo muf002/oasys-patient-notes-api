@@ -1,17 +1,25 @@
 import asyncio
 import uuid
 from collections.abc import AsyncGenerator, Generator
+from typing import Annotated
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi import Depends
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from testcontainers.postgres import PostgresContainer
 
 from app.core.database import Base, get_async_session
-from app.core.dependencies import get_current_provider
+from app.core.dependencies import get_current_provider, get_session_service
+from app.integrations.insights import StubInsightsGenerator
+from app.integrations.transcription import StubTranscriber
 from app.main import create_app
 from app.models.provider import Provider
+from app.repositories.patient import PatientRepository
+from app.repositories.session import SessionRepository
+from app.services.session import SessionService
 
 # ---------------------------------------------------------------------------
 # Session-scoped: spin up a real PostgreSQL 16 container once per test session
@@ -144,6 +152,71 @@ async def auth_client_b(
 ) -> AsyncGenerator[AsyncClient, None]:
     async for client in _make_auth_client(db_session, provider_b):
         yield client
+
+
+# ---------------------------------------------------------------------------
+# Stub fixtures — deterministic providers for integration tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def stub_transcriber() -> StubTranscriber:
+    return StubTranscriber()
+
+
+@pytest.fixture
+def stub_insights_generator() -> StubInsightsGenerator:
+    return StubInsightsGenerator()
+
+
+# ---------------------------------------------------------------------------
+# auth_client_a_with_stubs — real SessionService with stubs + suppressed pipeline
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+async def auth_client_a_with_stubs(
+    db_session: AsyncSession, db_engine, provider_a: Provider  # type: ignore[no-untyped-def]
+) -> AsyncGenerator[AsyncClient, None]:
+    """Provider A client with stub providers and run_pipeline suppressed via AsyncMock.
+
+    Background task execution is suppressed so integration tests verify HTTP contracts
+    only (202, PENDING state, list/get responses) without pipeline side effects.
+    """
+    test_session_factory = async_sessionmaker(
+        bind=db_engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    app = create_app()
+
+    async def _override_db() -> AsyncGenerator[AsyncSession, None]:
+        yield db_session
+
+    def _override_session_service(
+        db: Annotated[AsyncSession, Depends(get_async_session)],
+    ) -> SessionService:
+        service = SessionService(
+            session_repo=SessionRepository(db),
+            patient_repo=PatientRepository(db),
+            transcription_provider=StubTranscriber(),
+            insights_provider=StubInsightsGenerator(),
+            session_factory=test_session_factory,
+        )
+        service.run_pipeline = AsyncMock()  # type: ignore[method-assign]
+        return service
+
+    app.dependency_overrides[get_async_session] = _override_db
+    app.dependency_overrides[get_current_provider] = lambda: provider_a
+    app.dependency_overrides[get_session_service] = _override_session_service
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
 
 
 # ---------------------------------------------------------------------------

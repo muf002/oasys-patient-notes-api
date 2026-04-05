@@ -5,17 +5,25 @@ from typing import Annotated
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
-from app.core.database import get_async_session
+from app.core.database import AsyncSessionFactory, get_async_session
+from app.integrations.insights import GroqInsightsGenerator, InsightsProvider, StubInsightsGenerator
+from app.integrations.transcription import (
+    GroqWhisperTranscriber,
+    StubTranscriber,
+    TranscriptionProvider,
+)
 from app.models.provider import Provider
 from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
 from app.repositories.provider import ProviderRepository
+from app.repositories.session import SessionRepository
 from app.services.note import NoteService
 from app.services.patient import PatientService
 from app.services.provider import ProviderService
+from app.services.session import SessionService
 
 security = HTTPBearer()
 
@@ -69,4 +77,35 @@ def get_provider_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Provid
         provider_repo=ProviderRepository(db),
         patient_repo=PatientRepository(db),
         note_repo=NoteRepository(db),
+    )
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    return AsyncSessionFactory
+
+
+def get_transcription_provider() -> TranscriptionProvider:
+    if settings.GROQ_API_KEY:
+        return GroqWhisperTranscriber(api_key=settings.GROQ_API_KEY)
+    return StubTranscriber()
+
+
+def get_insights_provider() -> InsightsProvider:
+    if settings.GROQ_API_KEY:
+        return GroqInsightsGenerator(api_key=settings.GROQ_API_KEY)
+    return StubInsightsGenerator()
+
+
+def get_session_service(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    transcription_provider: Annotated[TranscriptionProvider, Depends(get_transcription_provider)],
+    insights_provider: Annotated[InsightsProvider, Depends(get_insights_provider)],
+    session_factory: Annotated[async_sessionmaker[AsyncSession], Depends(get_session_factory)],
+) -> SessionService:
+    return SessionService(
+        session_repo=SessionRepository(db),
+        patient_repo=PatientRepository(db),
+        transcription_provider=transcription_provider,
+        insights_provider=insights_provider,
+        session_factory=session_factory,
     )

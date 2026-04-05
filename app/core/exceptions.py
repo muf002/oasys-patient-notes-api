@@ -8,3 +8,7 @@ class NoteNotFoundError(Exception):
 
 class ProviderEmailConflictError(Exception):
     pass
+
+
+class SessionNotFoundError(Exception):
+    pass

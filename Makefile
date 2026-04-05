@@ -10,7 +10,7 @@ shell:
 	docker compose exec app bash
 
 test:
-	uv run pytest tests/ -v
+	uv run pytest tests/unit/ -v
 
 lint:
 	uv run ruff check . && uv run ruff format --check .

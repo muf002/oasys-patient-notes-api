@@ -1,10 +1,26 @@
+import logging
+
 from fastapi import FastAPI, HTTPException, Request, status
 
 from app.api.v1.router import router as v1_router
-from app.core.exceptions import NoteNotFoundError, PatientNotFoundError, ProviderEmailConflictError
+from app.core.exceptions import (
+    NoteNotFoundError,
+    PatientNotFoundError,
+    ProviderEmailConflictError,
+    SessionNotFoundError,
+)
+
+
+def _configure_logging() -> None:
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(levelname)s:     %(name)s - %(message)s",
+    )
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 
 def create_app() -> FastAPI:
+    _configure_logging()
     app = FastAPI(
         title="Oasys Patient Notes API",
         version="0.1.0",
@@ -19,6 +35,10 @@ def create_app() -> FastAPI:
     @app.exception_handler(NoteNotFoundError)
     async def note_not_found_handler(request: Request, exc: NoteNotFoundError) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Note not found")
+
+    @app.exception_handler(SessionNotFoundError)
+    async def session_not_found_handler(request: Request, exc: SessionNotFoundError) -> None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
 
     @app.exception_handler(ProviderEmailConflictError)
     async def provider_email_conflict_handler(
