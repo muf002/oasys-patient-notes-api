@@ -1,13 +1,12 @@
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 
 from app.core.dependencies import get_current_provider, get_note_service, get_patient_service
 from app.models.note import NoteType
 from app.models.provider import Provider
 from app.schemas.note import (
-    BulkNoteCreate,
     BulkNoteCreateResponse,
     NoteCreate,
     NoteResponse,
@@ -87,11 +86,17 @@ async def list_notes(
 @router.post("/{patient_id}/notes/bulk", response_model=BulkNoteCreateResponse, status_code=207)
 async def bulk_create_notes(
     patient_id: uuid.UUID,
-    body: BulkNoteCreate,
+    file: Annotated[UploadFile, File(description="CSV file with columns: note_type, session_date, content")],
     service: Annotated[NoteService, Depends(get_note_service)],
     current_provider: Annotated[Provider, Depends(get_current_provider)],
 ) -> BulkNoteCreateResponse:
-    return await service.bulk_create_notes(current_provider.id, patient_id, body)
+    if not file.filename or not file.filename.lower().endswith(".csv"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only .csv files are accepted.",
+        )
+    contents = await file.read()
+    return await service.bulk_create_notes(current_provider.id, patient_id, contents)
 
 
 @router.get("/{patient_id}/notes/{note_id}", response_model=NoteResponse)

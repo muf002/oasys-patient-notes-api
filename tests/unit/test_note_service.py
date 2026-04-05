@@ -1,15 +1,17 @@
 """Unit tests for NoteService — mocked repos, no DB, no HTTP."""
 
+import csv
+import io
 import uuid
 from datetime import UTC, date, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 
-from app.core.exceptions import NoteNotFoundError, PatientNotFoundError
+from app.core.exceptions import InvalidCSVError, NoteNotFoundError, PatientNotFoundError
 from app.models.note import Note, NoteType
 from app.models.patient import Patient
-from app.schemas.note import BulkNoteCreate, NoteCreate
+from app.schemas.note import NoteCreate
 from app.services.note import NoteService
 
 
@@ -165,6 +167,14 @@ class TestDeleteNote:
             await service.delete_note(provider_id, patient_id, uuid.uuid4())
 
 
+def _make_csv(*rows: dict) -> bytes:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=["note_type", "session_date", "content"])
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue().encode()
+
+
 class TestBulkCreateNotes:
     async def test_all_valid_items_created(
         self,
@@ -179,13 +189,11 @@ class TestBulkCreateNotes:
         note2 = _make_note(patient_id)
         note_repo.bulk_create.return_value = [note1, note2]
 
-        data = BulkNoteCreate(
-            notes=[
-                {"note_type": "intake", "content": "Intake note.", "session_date": "2024-01-01"},
-                {"note_type": "progress_note", "content": "Progress note.", "session_date": "2024-02-01"},
-            ]
+        csv_bytes = _make_csv(
+            {"note_type": "intake", "session_date": "2024-01-01", "content": "Intake note."},
+            {"note_type": "progress_note", "session_date": "2024-02-01", "content": "Progress note."},
         )
-        result = await service.bulk_create_notes(provider_id, patient_id, data)
+        result = await service.bulk_create_notes(provider_id, patient_id, csv_bytes)
 
         assert len(result.created) == 2
         assert len(result.failed) == 0
@@ -202,13 +210,11 @@ class TestBulkCreateNotes:
         valid_note = _make_note(patient_id)
         note_repo.bulk_create.return_value = [valid_note]
 
-        data = BulkNoteCreate(
-            notes=[
-                {"note_type": "progress_note", "content": "Valid note.", "session_date": "2024-01-01"},
-                {"note_type": "bad_type", "content": "Invalid.", "session_date": "2024-01-02"},
-            ]
+        csv_bytes = _make_csv(
+            {"note_type": "progress_note", "session_date": "2024-01-01", "content": "Valid note."},
+            {"note_type": "bad_type", "session_date": "2024-01-02", "content": "Invalid."},
         )
-        result = await service.bulk_create_notes(provider_id, patient_id, data)
+        result = await service.bulk_create_notes(provider_id, patient_id, csv_bytes)
 
         assert len(result.created) == 1
         assert len(result.failed) == 1
@@ -223,10 +229,68 @@ class TestBulkCreateNotes:
     ) -> None:
         patient_repo.get_by_id.return_value = None
 
-        data = BulkNoteCreate(
-            notes=[
-                {"note_type": "intake", "content": "Note content.", "session_date": "2024-01-01"}
-            ]
+        csv_bytes = _make_csv(
+            {"note_type": "intake", "session_date": "2024-01-01", "content": "Note content."}
         )
         with pytest.raises(PatientNotFoundError):
-            await service.bulk_create_notes(provider_id, patient_id, data)
+            await service.bulk_create_notes(provider_id, patient_id, csv_bytes)
+
+    async def test_missing_headers_raises_invalid_csv(
+        self,
+        service: NoteService,
+        patient_repo: AsyncMock,
+        provider_id: uuid.UUID,
+        patient_id: uuid.UUID,
+    ) -> None:
+        patient_repo.get_by_id.return_value = _make_patient(provider_id)
+        bad_csv = b"note_type,content\nintake,Missing session_date column.\n"
+
+        with pytest.raises(InvalidCSVError):
+            await service.bulk_create_notes(provider_id, patient_id, bad_csv)
+
+    async def test_non_utf8_bytes_raises_invalid_csv(
+        self,
+        service: NoteService,
+        patient_repo: AsyncMock,
+        provider_id: uuid.UUID,
+        patient_id: uuid.UUID,
+    ) -> None:
+        patient_repo.get_by_id.return_value = _make_patient(provider_id)
+
+        with pytest.raises(InvalidCSVError):
+            await service.bulk_create_notes(provider_id, patient_id, b"\xff\xfe bad bytes")
+
+    async def test_empty_csv_raises_invalid_csv(
+        self,
+        service: NoteService,
+        patient_repo: AsyncMock,
+        provider_id: uuid.UUID,
+        patient_id: uuid.UUID,
+    ) -> None:
+        patient_repo.get_by_id.return_value = _make_patient(provider_id)
+        headers_only = b"note_type,session_date,content\n"
+
+        with pytest.raises(InvalidCSVError):
+            await service.bulk_create_notes(provider_id, patient_id, headers_only)
+
+    async def test_content_with_commas_and_newlines_parsed_correctly(
+        self,
+        service: NoteService,
+        note_repo: AsyncMock,
+        patient_repo: AsyncMock,
+        provider_id: uuid.UUID,
+        patient_id: uuid.UUID,
+    ) -> None:
+        patient_repo.get_by_id.return_value = _make_patient(provider_id)
+        note_repo.bulk_create.return_value = [_make_note(patient_id)]
+
+        # RFC 4180: fields with commas/newlines are wrapped in double-quotes
+        csv_bytes = (
+            b"note_type,session_date,content\n"
+            b'progress_note,2024-01-01,"Patient noted improvement, follow up in 2 weeks.\n'
+            b'Mood stable."\n'
+        )
+        result = await service.bulk_create_notes(provider_id, patient_id, csv_bytes)
+
+        assert len(result.created) == 1
+        assert len(result.failed) == 0

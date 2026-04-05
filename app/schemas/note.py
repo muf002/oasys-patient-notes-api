@@ -1,6 +1,5 @@
 import uuid
 from datetime import date, datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,10 +28,6 @@ class NoteResponse(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
-
-
-class BulkNoteCreate(BaseModel):
-    notes: list[dict[str, Any]] = Field(min_length=1)
 
 
 class BulkNoteFailure(BaseModel):

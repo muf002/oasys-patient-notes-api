@@ -82,7 +82,7 @@ HTTP Request
 - **Domain exceptions** — services raise `PatientNotFoundError` / `NoteNotFoundError` (plain Python exceptions). Global handlers in `main.py` translate these to HTTP responses. The service layer has no FastAPI imports.
 - **Cross-provider isolation** — every patient lookup includes `provider_id` as a WHERE condition. A provider can never retrieve, modify, or delete another provider's data — even if they know the UUID — because the query simply returns nothing.
 - **Soft delete** — `Note.deleted_at` is set to the current timestamp rather than physically deleting the row. All queries filter `deleted_at IS NULL`.
-- **Bulk partial failure** — `POST /notes/bulk` accepts `list[dict]` rather than `list[NoteCreate]`, so Pydantic does not validate individual items at the HTTP boundary. The service validates each item individually and returns a 207 with separate `created` and `failed` lists.
+- **Bulk import via CSV** — `POST /patients/{id}/notes/bulk` accepts a `multipart/form-data` CSV file upload. This reflects the actual use case: a provider importing historical notes from an EHR or spreadsheet export, not a developer hand-authoring a JSON array. The router validates the file extension; the service decodes, parses, and validates each row independently, returning a 207 with separate `created` and `failed` lists.
 - **Async throughout** — SQLAlchemy async engine with `asyncpg`, all repository and service methods are `async def`.
 - **Token management** — `POST /api/v1/providers` is an unauthenticated bootstrap endpoint. It creates a provider and returns a lifetime JWT signed with `SECRET_KEY`. Tokens are also persisted to `data/tokens.json` for local development convenience.
 
@@ -159,8 +159,10 @@ make test
 
 ## Challenges & Trade-offs
 
-**Bulk partial failure and Pydantic validation boundary**
-The natural instinct is to use `list[NoteCreate]` in `BulkNoteCreate`, which gives clean OpenAPI docs and automatic validation. But Pydantic validates the entire list atomically — one invalid item rejects the whole request with 422, making 207 partial success unreachable. The fix is to accept `list[dict[str, Any]]` at the HTTP boundary and validate each item individually in the service. The trade-off is a less descriptive OpenAPI schema for the bulk endpoint's input; documented via `json_schema_extra` to compensate.
+**Bulk import via CSV file upload**
+The bulk note creation endpoint accepts a CSV file (`multipart/form-data`) rather than a JSON body. This matches the actual use case described in the requirements — importing historical notes — where a provider exports from an EHR or spreadsheet and uploads the file directly. No one hand-authors a JSON array of 50 clinical notes.
+
+The CSV must contain three columns: `note_type`, `session_date`, `content`. RFC 4180 quoting is fully supported, so `content` fields containing commas or newlines are handled correctly by Python's `csv.DictReader`. The service validates each row independently via Pydantic and returns a `207` response with separate `created` and `failed` lists, so a single bad row does not block the rest of the import. Structural errors (missing headers, non-UTF-8 encoding, empty file) raise `InvalidCSVError`, translated to `400` by the global exception handler.
 
 **Transaction commit placement**
 SQLAlchemy's async session context manager calls `session.close()` on exit, which rolls back any uncommitted transaction. Repositories use `flush()` (not `commit()`) to write within the current transaction and get server-generated values back. The commit must happen at the request boundary, not inside individual repo methods — otherwise a multi-step service operation (e.g. verify patient → create note) would commit after the first step. The solution is wrapping the yielded session in `async with session.begin()` inside `get_async_session`, which auto-commits on clean exit and auto-rolls back on exception.

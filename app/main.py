@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 
 from app.api.v1.router import router as v1_router
 from app.core.exceptions import (
+    InvalidCSVError,
     NoteNotFoundError,
     PatientNotFoundError,
     ProviderEmailConflictError,
@@ -45,6 +46,10 @@ def create_app() -> FastAPI:
         request: Request, exc: ProviderEmailConflictError
     ) -> None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+
+    @app.exception_handler(InvalidCSVError)
+    async def invalid_csv_handler(request: Request, exc: InvalidCSVError) -> None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, str]:

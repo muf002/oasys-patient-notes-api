@@ -5,7 +5,7 @@ from datetime import date
 import pytest
 
 from app.models.note import NoteType
-from app.schemas.note import BulkNoteCreate, NoteCreate, NoteUpdate
+from app.schemas.note import NoteCreate, NoteUpdate
 
 
 class TestNoteCreate:
@@ -69,15 +69,3 @@ class TestNoteUpdate:
             NoteUpdate(content="")
 
 
-class TestBulkNoteCreate:
-    def test_empty_list_rejected(self) -> None:
-        with pytest.raises(ValueError):
-            BulkNoteCreate(notes=[])
-
-    def test_single_note_accepted(self) -> None:
-        bulk = BulkNoteCreate(
-            notes=[
-                {"note_type": "intake", "content": "First session.", "session_date": "2024-01-01"}
-            ]
-        )
-        assert len(bulk.notes) == 1

@@ -129,18 +129,11 @@ class TestCrossProviderNoteIsolation:
         auth_client_b: AsyncClient,
     ) -> None:
         patient_a = await _create_patient(auth_client_a)
+        csv_bytes = b"note_type,session_date,content\nintake,2024-01-01,Unauthorized note.\n"
 
         resp = await auth_client_b.post(
             f"/api/v1/patients/{patient_a['id']}/notes/bulk",
-            json={
-                "notes": [
-                    {
-                        "note_type": "intake",
-                        "content": "Unauthorized note.",
-                        "session_date": "2024-01-01",
-                    }
-                ]
-            },
+            files={"file": ("notes.csv", csv_bytes, "text/csv")},
         )
         assert resp.status_code == 404
 

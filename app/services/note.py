@@ -1,14 +1,15 @@
+import csv
+import io
 import logging
 import uuid
 
 from pydantic import ValidationError
 
-from app.core.exceptions import NoteNotFoundError, PatientNotFoundError
+from app.core.exceptions import InvalidCSVError, NoteNotFoundError, PatientNotFoundError
 from app.models.note import NoteType
 from app.repositories.note import NoteRepository
 from app.repositories.patient import PatientRepository
 from app.schemas.note import (
-    BulkNoteCreate,
     BulkNoteCreateResponse,
     BulkNoteFailure,
     NoteCreate,
@@ -95,32 +96,51 @@ class NoteService:
         logger.info("Note %s deleted for patient %s", note_id, patient_id)
 
     async def bulk_create_notes(
-        self, provider_id: uuid.UUID, patient_id: uuid.UUID, data: BulkNoteCreate
+        self, provider_id: uuid.UUID, patient_id: uuid.UUID, csv_bytes: bytes
     ) -> BulkNoteCreateResponse:
         await self._require_patient(patient_id, provider_id)
 
-        valid_items: list[tuple[int, NoteCreate]] = []
+        try:
+            text = csv_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InvalidCSVError("File must be UTF-8 encoded") from exc
+
+        reader = csv.DictReader(io.StringIO(text))
+        required_headers = {"note_type", "session_date", "content"}
+        if reader.fieldnames is None or not required_headers.issubset(set(reader.fieldnames)):
+            raise InvalidCSVError("CSV must contain headers: note_type, session_date, content")
+
+        valid_items: list[NoteCreate] = []
         failed: list[BulkNoteFailure] = []
 
-        for i, raw in enumerate(data.notes):
+        for i, row in enumerate(reader):
             try:
-                item = NoteCreate.model_validate(raw)
-                valid_items.append((i, item))
+                item = NoteCreate.model_validate(
+                    {
+                        "note_type": row["note_type"].strip(),
+                        "content": row["content"].strip(),
+                        "session_date": row["session_date"].strip(),
+                    }
+                )
+                valid_items.append(item)
             except ValidationError as exc:
                 failed.append(BulkNoteFailure(index=i, errors=str(exc)))
+
+        if not valid_items and not failed:
+            raise InvalidCSVError("CSV file contains no data rows")
 
         created_notes: list[NoteResponse] = []
         if valid_items:
             db_notes = await self._note_repo.bulk_create(
                 patient_id=patient_id,
-                items=[
-                    (item.note_type, item.content, item.session_date) for _, item in valid_items
-                ],
+                items=valid_items,
             )
             created_notes = [NoteResponse.model_validate(n) for n in db_notes]
 
         logger.info(
-            "Bulk note creation for patient %s: %d created, %d failed",
-            patient_id, len(created_notes), len(failed),
+            "Bulk note import for patient %s: %d created, %d failed",
+            patient_id,
+            len(created_notes),
+            len(failed),
         )
         return BulkNoteCreateResponse(created=created_notes, failed=failed)

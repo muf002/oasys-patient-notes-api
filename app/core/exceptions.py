@@ -12,3 +12,7 @@ class ProviderEmailConflictError(Exception):
 
 class SessionNotFoundError(Exception):
     pass
+
+
+class InvalidCSVError(Exception):
+    pass

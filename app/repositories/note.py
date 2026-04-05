@@ -5,6 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.note import Note, NoteType
+from app.schemas.note import NoteCreate
 
 
 class NoteRepository:
@@ -81,17 +82,17 @@ class NoteRepository:
     async def bulk_create(
         self,
         patient_id: uuid.UUID,
-        items: list[tuple[NoteType, str, date]],
+        items: list[NoteCreate],
     ) -> list[Note]:
         notes = [
             Note(
                 id=uuid.uuid4(),
                 patient_id=patient_id,
-                note_type=note_type,
-                content=content,
-                session_date=session_date,
+                note_type=item.note_type,
+                content=item.content,
+                session_date=item.session_date,
             )
-            for note_type, content, session_date in items
+            for item in items
         ]
         self._session.add_all(notes)
         await self._session.flush()
